@@ -10,7 +10,7 @@ const server: http.Server = http.createServer(app);
 const io: socketio.Server = new socketio.Server();
 io.attach(server, {
     cors: {
-        origin: `http://localhost:${port}`,
+        origin: process.env.FE_URL || "http://localhost:3200",
         methods: ["GET", "POST"],
         allowedHeaders: ["my-custom-header", "Access-Control-Allow-Origin"],
         credentials: true
