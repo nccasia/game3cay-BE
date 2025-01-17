@@ -677,7 +677,7 @@ io.on('connection', (socket) => {
         }
 
         const owner = getUserInfo(room.owner);
-        if (!owner || owner.wallet < room.betAmount * room.members.length) {
+        if (!owner || owner.wallet < room.betAmount * maxCoefficient * (room.members.length - 1)) {
             socket.emit('status', { message: 'Owner does not have enough tokens' });
             return;
         }
