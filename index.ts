@@ -665,6 +665,16 @@ io.on('connection', (socket) => {
             return;
         }
 
+        const insufficientFunds = room.members?.some(memberId => {
+            const user = getUserInfo(memberId);
+            return user ? user.wallet < (room.betAmount * maxCoefficient) : true;
+        });
+
+        if (insufficientFunds) {
+            socket.emit('status', { message: 'Some members do not have enough tokens' });
+            return;
+        }
+
         if (!roomGames[data.roomId]) {
             roomGames[data.roomId] = new PokerGame();
         }
