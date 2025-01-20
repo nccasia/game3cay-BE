@@ -2,7 +2,6 @@ import express, { Express, Request, Response } from 'express';
 import * as http from 'http';
 import * as socketio from 'socket.io';
 import dotenv from 'dotenv';
-import { UserInfo } from 'os';
 const axios = require('axios');
 const port: number = parseInt(process.env.PORT || '3200', 10);
 
@@ -38,10 +37,6 @@ const users: User[] = [];
 const addUser = (id: string, username: string, displayName: string, wallet: number, avatarUrl: string, email: string, socketId: string) => {
     const user: User = { id, username, displayName, wallet, socketId, avatarUrl, email };
     users.push(user);
-};
-
-const getUserInfoByUsername = (username: string): User | undefined => {
-    return users.find(user => user.username === username);
 };
 
 const getRoomMembersName = (roomId: string): string[] => {
@@ -112,10 +107,6 @@ const createRoom = (name: string, socket: socketio.Socket, betAmount: number): R
     return newRoom;
 };
 
-const checkBeforeJoinRoom = (roomId: string): boolean => {
-    return rooms.some(room => room.id === roomId);
-};
-
 const joinRoom = (roomId: string, userInfo: User): boolean => {
     const room = rooms.find(room => room.id === roomId);
     if (!room) return false;
@@ -166,30 +157,52 @@ const handleBetResults = (roomId: string, playerScores: { id: string, score: num
     playerRanks.forEach(player => {
         console.log('Player:', player.userInfo.username, 'score:', player.score, 'rank:', player.rank);
         if (player.userInfo.id === medalHolder.id) return;
+
         const playerInfo = getUserInfo(player.userInfo.id);
         if (!playerInfo) return;
-        if (player.rank < medalHolderRank) {
-            // Player wins
-            ownerWinCount -= player.score === maxScore ? 2 : 1;
 
-            const rewardAmount = player.score === maxScore
-                ? room.betAmount * (maxCoefficient + 2)
-                : room.betAmount * (maxCoefficient + 1);
+        if (!roomGames[room.id]) {
+            roomGames[room.id] = new PokerGame();
+        }
+        const game = roomGames[room.id];
+
+        const playerHasThreeIdenticalCards = game.hasSapCards(game._playerHoleCards[player.index]);
+        const medalHolderHasThreeIdenticalCards = game.hasSapCards(game._playerHoleCards.find((_, index) => index === playerRanks.find(p => p.userInfo.id === medalHolder.id)?.index) || []);
+
+        const playerHasDongHoaCards = game.hasDongHoaCards(game._playerHoleCards[player.index]);
+        const medalHolderHasDongHoaCards = game.hasDongHoaCards(game._playerHoleCards.find((_, index) => index === playerRanks.find(p => p.userInfo.id === medalHolder.id)?.index) || []);
+
+        const calculateRewardOrPenalty = (condition: boolean, rewardMultiplier: number, penaltyMultiplier: number) => {
+            if (condition) {
+            // player wins
+            ownerWinCount -= rewardMultiplier;
+            const rewardAmount = room.betAmount * (maxCoefficient + rewardMultiplier);
             userRewards.push({ userId: player.userInfo.id, amount: rewardAmount });
             player.userInfo.wallet += rewardAmount;
-
-        } else {
-            // Player loses
-            ownerWinCount += medalHolderScore === maxScore ? 2 : 1;
-
-            const penaltyAmount = medalHolderScore === maxScore
-                ? room.betAmount * (maxCoefficient - 2)
-                : room.betAmount * (maxCoefficient - 1);
-
+            } else {
+            // player loses
+            ownerWinCount += penaltyMultiplier;
+            const penaltyAmount = room.betAmount * (maxCoefficient - penaltyMultiplier);
             player.userInfo.wallet -= penaltyAmount;
             userRewards.push({ userId: player.userInfo.id, amount: penaltyAmount });
-        }
+            }
+        };
 
+        if (playerHasDongHoaCards && !medalHolderHasDongHoaCards) {
+            calculateRewardOrPenalty(true, 4, 4);
+        } else if (!playerHasDongHoaCards && medalHolderHasDongHoaCards) {
+            calculateRewardOrPenalty(false, 4, 4);
+        } else if (playerHasDongHoaCards && medalHolderHasDongHoaCards) {
+            calculateRewardOrPenalty(player.rank < medalHolderRank, 4, 4);
+        } else if (playerHasThreeIdenticalCards && !medalHolderHasThreeIdenticalCards) {
+            calculateRewardOrPenalty(true, 3, 3);
+        } else if (!playerHasThreeIdenticalCards && medalHolderHasThreeIdenticalCards) {
+            calculateRewardOrPenalty(false, 3, 3);
+        } else if (playerHasThreeIdenticalCards && medalHolderHasThreeIdenticalCards) {
+            calculateRewardOrPenalty(player.rank < medalHolderRank, 3, 3);
+        } else {
+            calculateRewardOrPenalty(player.rank < medalHolderRank, player.score === maxScore ? 2 : 1, medalHolderScore === maxScore ? 2 : 1);
+        }
         const existingUpdate = playerWalletUpdates.find(update => update.userId === player.userInfo.id);
         if (existingUpdate) {
             existingUpdate.wallet = playerInfo.wallet;
@@ -199,13 +212,11 @@ const handleBetResults = (roomId: string, playerScores: { id: string, score: num
     });
 
     const medalHolderReward = room.betAmount * maxCoefficient * (room.members.length - 1) + (ownerWinCount * room.betAmount);
-
     userRewards.push({ userId: medalHolder.id, amount: medalHolderReward });
     medalHolder.wallet += medalHolderReward;
     getRewardWinnerWithArray(room.sessionId, userRewards);
 
     // Send updated wallets
-    console.log('playerwalletupdates 111:', playerWalletUpdates);
     io.to(room.id).emit('playerWalletUpdated', playerWalletUpdates);
 
     // Update the medal holder
@@ -216,19 +227,6 @@ const handleBetResults = (roomId: string, playerScores: { id: string, score: num
         room.owner = winner.id;
         io.to(room.id).emit('updateOwner', { roomOwner: room.owner, roomMembers: room.members });
     }
-
-    //      // Reward winner
-    // const winnerId = playerRanks.find(player => player.rank === 1)?.userInfo.id;
-    // if (winnerId) {
-    //     console.log('Room:', room.id, 'sess:', room.sessionId, 'winner:', winnerId);
-    //     getRewardWinner(room.sessionId, [{ userId: winnerId, amount: room.betAmount }])
-    //         .then(response => {
-    //             console.log('Reward response:', response);
-    //             // io.to(data.roomId).emit('winnerRewarded', { message: 'Winner has been rewarded', winner });
-    //         });
-    // }
-
-    //  getRewardWinner(room.sessionId, medalHolder.id, room.betAmount * (maxCoefficient - 1));
 };
 
 const leaveRoom = (roomId: string, userId: string): boolean => {
@@ -339,6 +337,25 @@ class PokerGame {
         return highestCards;
     }
 
+    public hasDongHoaCards = (cards: { suit: string, point: number }[]): boolean => {
+        const sortedCards = cards.slice().sort((a, b) => a.point - b.point);
+        for (let i = 0; i < sortedCards.length - 2; i++) {
+            if (
+                sortedCards[i].suit === sortedCards[i + 1].suit &&
+                sortedCards[i].suit === sortedCards[i + 2].suit &&
+                sortedCards[i].point + 1 === sortedCards[i + 1].point &&
+                sortedCards[i].point + 2 === sortedCards[i + 2].point
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public hasSapCards = (cards: { suit: string, point: number }[]): boolean => {
+        const cardPoints = cards.map(card => card.point);
+        return cardPoints.some(point => cardPoints.filter(p => p === point).length === 3);
+    };
 
     public determineWinner(): { score: number; card: { suit: string; point: number }; index: number; name: string; rank: number, userInfo: User }[] {
         const players = Array.from({ length: this._playersNum }, (_, i) => {
@@ -353,17 +370,6 @@ class PokerGame {
                 name: this._playerName[i],
                 userInfo: user!
             };
-        });
-
-        const hasThreeIdenticalCards = (cards: { suit: string, point: number }[]): boolean => {
-            const cardPoints = cards.map(card => card.point);
-            return cardPoints.some(point => cardPoints.filter(p => p === point).length === 3);
-        };
-
-        players.forEach(player => {
-            if (!hasThreeIdenticalCards(this._playerHoleCards[player.index])) {
-                console.log('Player:', player.name, 'has three identical cards');
-            }
         });
 
         players.sort((a, b) => {
@@ -406,14 +412,6 @@ class PokerGame {
 
 const pokerGame = new PokerGame();
 
-const getCurrentRoom = (userId: string): Room | undefined => {
-    return rooms.find(room => room.members.includes(userId));
-};
-
-const getRoomOfUser = (userId: string): Room | undefined => {
-    return rooms.find(room => room.members.includes(userId));
-};
-
 const getRoomMembers = (roomId: string): string[] | undefined => {
     const room = rooms.find(room => room.id === roomId);
     return room ? room.members : undefined;
@@ -428,33 +426,11 @@ const generateRoomId = (): string => {
     return Math.random().toString(36).substring(2, 11);
 };
 
-const startBet = (roomId: string, betAmount: number): boolean => {
-    return true;
-};
-
-const endBet = (roomId: string): boolean => {
-    return true;
-};
-
-const getGameMemberStatus = (roomId: string, userId: string): string => {
-    return 'active';
-};
-
-const getGameOfMember = (roomId: string, userId: string): string => {
-    return 'gameId';
-};
-
 const getRewardFromBot = (userId: string): number => {
     const user = getUserInfo(userId);
     return user ? user.wallet : 0;
 };
 
-const endGame = (roomId: string) => {
-    const room = rooms.find(room => room.id === roomId);
-    if (room) {
-        room.isPlaying = false;
-    }
-};
 
 const generateSessionId = (): string => {
     return Math.random().toString(36).substring(2, 15);
