@@ -148,14 +148,12 @@ const handleBetResults = (roomId: string, playerScores: { id: string, score: num
 
     const allWallets = getAllWallets();
     playerWalletUpdates = allWallets;
-    console.log('All player wallets:', allWallets);
 
     let ownerWinCount = 0;
 
     const userRewards: { userId: string, amount: number }[] = [];
 
     playerRanks.forEach(player => {
-        console.log('Player:', player.userInfo.username, 'score:', player.score, 'rank:', player.rank);
         if (player.userInfo.id === medalHolder.id) return;
 
         const playerInfo = getUserInfo(player.userInfo.id);
@@ -233,12 +231,18 @@ const leaveRoom = (roomId: string, userId: string): boolean => {
     const room = rooms.find(room => room.id === roomId);
     if (room) {
         room.members = room.members.filter(member => member !== userId);
-        if (room.owner === userId && room.members.length > 0) room.owner = room.members[0];
+        room.readyPlayer = room.readyPlayer.filter(player => player !== userId);
+        if (room.owner === userId && room.members.length > 0) {
+            io.to(room.id).emit('updateOwner', { roomOwner: room.members[0], roomMembers: room.members });
+            room.owner = room.members[0];
+        }
         if (room.members.length === 0) {
             const roomIndex = rooms.findIndex(r => r.id === roomId);
             if (roomIndex !== -1) {
                 rooms.splice(roomIndex, 1);
             }
+        }else{
+            room.members = room.members.filter(member => member !== userId);
         }
         return true;
     }
@@ -499,7 +503,7 @@ io.on('connection', (socket) => {
             }
         }
     });
-    socket.emit('listRoom', rooms);
+    io.emit('listRoom', rooms);
 
     socket.on('disconnect', () => {
         console.log('client disconnected');
@@ -533,17 +537,20 @@ io.on('connection', (socket) => {
                     rooms.splice(roomIndex, 1);
                 }
             } else if (room.owner === data.userId) {
+                console.log('Owner left the room:', room.id);
                 room.owner = room.members[0];
                 io.to(room.id).emit('playerReady', { owner: room.owner, readyPlayer: room.readyPlayer });
             }
         });
-        socket.emit('listRoom', rooms);
+        console.log('Rooms index:', rooms);
+        io.emit('listRoom', rooms);
     });
 
     socket.on('agreeGame', (data) => {
         const room = rooms.find(room => room.id === data.roomId);
         if (room) {
             if (!room.readyPlayer.includes(data.userId) && data.agree) {
+                
                 room.readyPlayer.push(data.userId);
             } else {
                 room.readyPlayer = room.readyPlayer.filter(id => id !== data.userId);
