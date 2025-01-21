@@ -506,8 +506,6 @@ io.on('connection', (socket) => {
     io.emit('listRoom', rooms);
 
     socket.on('disconnect', () => {
-        console.log('client disconnected');
-        disconnectUser(socket.id);
         const user = getUserBySocketId(socket.id);
         if (user) {
             rooms.forEach(room => {
@@ -517,6 +515,7 @@ io.on('connection', (socket) => {
                 }
             });
         }
+        disconnectUser(socket.id);
     });
 
     socket.on('leaveRoom', (data) => {
@@ -688,51 +687,38 @@ io.on('connection', (socket) => {
         const playerHoleCards = game._playerHoleCards;
         playerRanks = game.determineWinner();
 
-        const roomMemberTokens = roomMembers?.map(memberId => {
+        room.isPlaying = true;
+        room.sessionId = generateSessionId();
+        console.log('Session ID:', room.sessionId);
+        io.to(data.roomId).emit('startedGame', {
+            playerHoleCards,
+            playerRanks,
+        });
+
+        roomMembers?.forEach(memberId => {
             const user = getUserInfo(memberId);
-            return user ? { id: user.id, token: getRewardFromBot(user.id) } : null;
-        }).filter(member => member !== null) || [];
-
-        const allMembersHaveEnoughTokens = roomMemberTokens.every(member => member && member.token > room.betAmount);
-
-        if (allMembersHaveEnoughTokens) {
-            if (room) room.isPlaying = true;
-
-            room.sessionId = generateSessionId();
-            console.log('Session ID:', room.sessionId);
-            io.to(data.roomId).emit('startedGame', {
-                playerHoleCards,
-                playerRanks,
-            });
-
-            roomMembers?.forEach(memberId => {
-                const user = getUserInfo(memberId);
-                if (user) {
-                    if (user.id !== room.medalHolder) {
-                        io.to(user.socketId).emit("startBet", {
-                            gameId: room.id,
-                            totalBet: room.betAmount * maxCoefficient,
-                            receiverId: BOT_ID,
-                            appId: APP_ID,
-                            currentGameId: room.sessionId,
-                        });
-                        user.wallet -= room.betAmount * maxCoefficient;
-                    } else {
-                        io.to(user.socketId).emit("startBet", {
-                            gameId: room.id,
-                            totalBet: room.betAmount * maxCoefficient * (room.members.length - 1),
-                            receiverId: BOT_ID,
-                            appId: APP_ID,
-                            currentGameId: room.sessionId,
-                        });
-                        user.wallet -= room.betAmount * maxCoefficient * (room.members.length - 1);
-                    }
+            if (user) {
+                if (user.id !== room.medalHolder) {
+                    io.to(user.socketId).emit("startBet", {
+                        gameId: room.id,
+                        totalBet: room.betAmount * maxCoefficient,
+                        receiverId: BOT_ID,
+                        appId: APP_ID,
+                        currentGameId: room.sessionId,
+                    });
+                    user.wallet -= room.betAmount * maxCoefficient;
+                } else {
+                    io.to(user.socketId).emit("startBet", {
+                        gameId: room.id,
+                        totalBet: room.betAmount * maxCoefficient * (room.members.length - 1),
+                        receiverId: BOT_ID,
+                        appId: APP_ID,
+                        currentGameId: room.sessionId,
+                    });
+                    user.wallet -= room.betAmount * maxCoefficient * (room.members.length - 1);
                 }
-            });
-        }
-        else {
-            socket.emit('status', { message: 'Some members do not have enough tokens' });
-        }
+            }
+        });
     });
 
 });
