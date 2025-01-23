@@ -39,6 +39,26 @@ const addUser = (id: string, username: string, displayName: string, wallet: numb
     users.push(user);
 };
 
+const dealCards = (roomId: string) => {
+    const room = rooms.find(room => room.id === roomId);
+    if (!room) return;
+    const game = roomGames[roomId];
+    const roomMembers = getRoomMembers(roomId);
+    game._playersNum = roomMembers ? roomMembers.length : 1;
+    game._playerName = getRoomMembersName(roomId);
+    game.takePoker(game._playersNum);
+
+    const playerHoleCards = game._playerHoleCards;
+    playerRanks = game.determineWinner();
+
+    room.isPlaying = true;
+    console.log('Session ID:', room.sessionId);
+    io.to(roomId).emit('startedGame', {
+        playerHoleCards,
+        playerRanks,
+    });
+};
+
 const getRoomMembersName = (roomId: string): string[] => {
     const room = rooms.find(room => room.id === roomId);
     if (room) {
@@ -81,6 +101,8 @@ interface Room {
     medalHolder: string;
     sessionId: string;
     betAmount: number;
+    allUserConfirmed: boolean;
+    userConfirmed: string[];
 }
 
 const rooms: Room[] = [];
@@ -101,6 +123,8 @@ const createRoom = (name: string, socket: socketio.Socket, betAmount: number): R
         medalHolder: '',
         sessionId: '',
         betAmount: betAmount,
+        allUserConfirmed: true,
+        userConfirmed: []
     };
     rooms.push(newRoom);
     socket.emit('listRoom', rooms);
@@ -171,19 +195,10 @@ const handleBetResults = (roomId: string, playerScores: { id: string, score: num
         const medalHolderHasDongHoaCards = game.hasDongHoaCards(game._playerHoleCards.find((_, index) => index === playerRanks.find(p => p.userInfo.id === medalHolder.id)?.index) || []);
 
         const calculateRewardOrPenalty = (condition: boolean, rewardMultiplier: number, penaltyMultiplier: number) => {
-            if (condition) {
-            // player wins
-            ownerWinCount -= rewardMultiplier;
-            const rewardAmount = room.betAmount * (maxCoefficient + rewardMultiplier);
-            userRewards.push({ userId: player.userInfo.id, amount: rewardAmount });
-            player.userInfo.wallet += rewardAmount;
-            } else {
-            // player loses
-            ownerWinCount += penaltyMultiplier;
-            const penaltyAmount = room.betAmount * (maxCoefficient - penaltyMultiplier);
-            player.userInfo.wallet -= penaltyAmount;
-            userRewards.push({ userId: player.userInfo.id, amount: penaltyAmount });
-            }
+            const amount = room.betAmount * (maxCoefficient + (condition ? rewardMultiplier : -penaltyMultiplier));
+            userRewards.push({ userId: player.userInfo.id, amount });
+            player.userInfo.wallet += amount;
+            ownerWinCount += condition ? -rewardMultiplier : penaltyMultiplier;
         };
 
         if (playerHasDongHoaCards && !medalHolderHasDongHoaCards) {
@@ -241,7 +256,7 @@ const leaveRoom = (roomId: string, userId: string): boolean => {
             if (roomIndex !== -1) {
                 rooms.splice(roomIndex, 1);
             }
-        }else{
+        } else {
             room.members = room.members.filter(member => member !== userId);
         }
         return true;
@@ -548,13 +563,14 @@ io.on('connection', (socket) => {
         const room = rooms.find(room => room.id === data.roomId);
         if (room) {
             if (!room.readyPlayer.includes(data.userId) && data.agree) {
-                
+
                 room.readyPlayer.push(data.userId);
             } else {
                 room.readyPlayer = room.readyPlayer.filter(id => id !== data.userId);
             }
 
             if (!room.readyPlayer.includes(room.owner)) room.readyPlayer.push(room.owner);
+            console.log('Player ready 4:', data.userId, room.readyPlayer);
             io.to(data.roomId).emit('playerReady', { owner: room.owner, readyPlayer: room.readyPlayer });
         } else {
             console.log(`Room ${data.roomId} not found`);
@@ -578,8 +594,8 @@ io.on('connection', (socket) => {
         if (user && user.id == userInfo.id) {
             console.log(`User updated: ${JSON.stringify(user)}`);
         } else {
-            addUser(userInfo.id, userInfo.username, userInfo.displayName, userInfo.wallet, userInfo.avatarUrl, userInfo.email, socket.id);
             console.log(`User added: ${JSON.stringify(userInfo)}`);
+            addUser(userInfo.id, userInfo.username, userInfo.displayName, userInfo.wallet, userInfo.avatarUrl, userInfo.email, socket.id);
         }
     });
 
@@ -631,6 +647,7 @@ io.on('connection', (socket) => {
         if (room && !room.readyPlayer.includes(room.owner)) {
             room.readyPlayer.push(room.owner);
         }
+        console.log(`User ${data.userInfo.username} joined room ${data.roomId}`);
 
         io.to(data.roomId).emit('roomJoined', {
             message: roomJoined ? `Room "${data.roomId}" joined successfully` : `Room "${data.roomId}" not found`,
@@ -638,6 +655,18 @@ io.on('connection', (socket) => {
             roomMembers,
             owner: room?.owner,
         });
+    });
+
+    socket.on('userCancelBet', (data) => {
+        console.log('User canceled bet:', data);
+        const room = rooms.find(room => room.id === data.roomId);
+        if (room) room.allUserConfirmed = false;
+    });
+
+    socket.on('userConfirmBet', (data) => {
+        console.log('User confirmed bet:', data);
+        const room = rooms.find(room => room.id === data.roomId);
+        if (room) room.userConfirmed.push(data.userId);
     });
 
     socket.on('startGame', (data) => {
@@ -653,7 +682,7 @@ io.on('connection', (socket) => {
         }
 
         if (room.readyPlayer.length !== room.members.length) {
-            socket.emit('status', { message: 'Not all players are ready' });
+            io.to(room.id).emit('status', { message: 'Not all players are ready', });
             return;
         }
 
@@ -677,23 +706,11 @@ io.on('connection', (socket) => {
             roomGames[data.roomId] = new PokerGame();
         }
 
-        const game = roomGames[data.roomId];
-        const roomMembers = getRoomMembers(data.roomId);
-        game._playersNum = roomMembers ? roomMembers.length : 1;
-        game._playerName = getRoomMembersName(data.roomId);
-        game.takePoker(game._playersNum);
-
-        const playerHoleCards = game._playerHoleCards;
-        playerRanks = game.determineWinner();
-
-        room.isPlaying = true;
+        room.allUserConfirmed = true;
+        room.userConfirmed = [];
         room.sessionId = generateSessionId();
-        console.log('Session ID:', room.sessionId);
-        io.to(data.roomId).emit('startedGame', {
-            playerHoleCards,
-            playerRanks,
-        });
 
+        const roomMembers = getRoomMembers(data.roomId);
         roomMembers?.forEach(memberId => {
             const user = getUserInfo(memberId);
             if (user) {
@@ -718,6 +735,25 @@ io.on('connection', (socket) => {
                 }
             }
         });
+
+        setTimeout(() => {
+            const room = rooms.find(room => room.id === data.roomId);
+            if (!room) return;
+            console.log('All users confirmed:', room.allUserConfirmed);
+            if (room.allUserConfirmed || room.userConfirmed.length === room.members.length) {
+                dealCards(data.roomId);
+            } else {
+                io.to(room?.id).emit('userConfirmed', { message: 'Not all users confirmed' });
+                const userRewards: { userId: string, amount: number }[] = [];
+                for (let i = 0; i < room.userConfirmed.length; i++) {
+                    const user = getUserInfo(room.userConfirmed[i]);
+                    if (user) {
+                        userRewards.push({ userId: user.id, amount: room.betAmount * maxCoefficient });
+                    }
+                }
+                getRewardWinnerWithArray(room.sessionId, userRewards);
+            }
+        }, 10000);
     });
 
 });
