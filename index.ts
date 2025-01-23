@@ -749,6 +749,7 @@ io.on('connection', (socket) => {
                     const user = getUserInfo(room.userConfirmed[i]);
                     if (user) {
                         userRewards.push({ userId: user.id, amount: room.betAmount * maxCoefficient });
+                        user.wallet += room.betAmount * maxCoefficient;
                     }
                 }
                 getRewardWinnerWithArray(room.sessionId, userRewards);
