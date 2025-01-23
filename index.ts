@@ -464,7 +464,6 @@ const getRewardWinnerWithArray = async (currentGameId: string, userRewards: { us
         return response.data;
     } catch (error) {
         console.error('Error rewarding winners:', error);
-        throw error;
     }
 };
 
