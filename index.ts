@@ -593,6 +593,8 @@ io.on('connection', (socket) => {
         const user = users.find((user) => user.id === userInfo.id);
         if (user && user.id == userInfo.id) {
             console.log(`User updated: ${JSON.stringify(user)}`);
+            disconnectUser(socket.id);
+            addUser(userInfo.id, userInfo.username, userInfo.displayName, userInfo.wallet, userInfo.avatarUrl, userInfo.email, socket.id);
         } else {
             console.log(`User added: ${JSON.stringify(userInfo)}`);
             addUser(userInfo.id, userInfo.username, userInfo.displayName, userInfo.wallet, userInfo.avatarUrl, userInfo.email, socket.id);
