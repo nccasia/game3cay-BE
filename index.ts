@@ -535,7 +535,7 @@ io.on('connection', (socket) => {
     socket.on('leaveRoom', (data) => {
         const room = rooms.find(room => room.id === data.id);
         if (room && room.isPlaying) {
-            socket.emit('status', { message: 'Game already in progress' });
+            io.to(socket.id).emit('status', { message: 'Game already in progress' });
             return;
         }
         if (leaveRoom(data.id, data.userId)) {
@@ -622,12 +622,12 @@ io.on('connection', (socket) => {
     socket.on('joinRoom', (data) => {
         const room = rooms.find(room => room.id === data.roomId);
         if (!room) {
-            socket.emit('status', { message: 'Room not found' });
+            io.to(socket.id).emit('status', { message: 'Room not found' });
             return;
         }
 
         if (room.isPlaying) {
-            socket.emit('status', { message: 'Game already in progress' });
+            io.to(socket.id).emit('status', { message: 'Game already in progress' });
             return;
         }
 
@@ -644,7 +644,7 @@ io.on('connection', (socket) => {
             } : null;
         }).filter((member) => member !== null) || [];
 
-        socket.join(data.roomId);
+        io.socketsJoin(data.roomId);
 
         if (room && !room.readyPlayer.includes(room.owner)) {
             room.readyPlayer.push(room.owner);
@@ -674,12 +674,12 @@ io.on('connection', (socket) => {
     socket.on('startGame', (data) => {
         const room = rooms.find(room => room.id === data.roomId);
         if (!room) {
-            socket.emit('status', { message: 'Room not found' });
+            io.to(socket.id).emit('status', { message: 'Room not found' });
             return;
         }
 
         if (room.members.length == 1) {
-            socket.emit('status', { message: 'Not enough players' });
+            io.to(room.id).emit('status', { message: 'Not enough players' });
             return;
         }
 
@@ -690,7 +690,7 @@ io.on('connection', (socket) => {
 
         const owner = getUserInfo(room.owner);
         if (!owner || owner.wallet < room.betAmount * maxCoefficient * (room.members.length - 1)) {
-            socket.emit('status', { message: 'Owner does not have enough tokens' });
+            io.to(room.id).emit('status', { message: 'Owner does not have enough tokens' });
             return;
         }
 
@@ -700,7 +700,7 @@ io.on('connection', (socket) => {
         });
 
         if (insufficientFunds) {
-            socket.emit('status', { message: 'Some members do not have enough tokens' });
+            io.to(room.id).emit('status', { message: 'Some members do not have enough tokens' });
             return;
         }
 
