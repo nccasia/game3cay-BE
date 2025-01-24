@@ -525,6 +525,7 @@ io.on('connection', (socket) => {
             rooms.forEach(room => {
                 if (room.members.includes(user.id)) {
                     leaveRoom(room.id, user.id);
+                    socket.leave(room.id);
                     io.to(room.id).emit('roomLeft', { message: `User "${user.username}" left the room`, roomMembers: getRoomMembers(room.id) });
                 }
             });
