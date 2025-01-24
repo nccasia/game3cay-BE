@@ -540,6 +540,7 @@ io.on('connection', (socket) => {
         }
         if (leaveRoom(data.id, data.userId)) {
             io.to(data.id).emit('roomLeft', { message: `Room "${data.id}" left successfully`, roomMembers: getRoomMembers(data.id) });
+            socket.leave(data.id);
         } else {
             io.to(data.id).emit('roomLeft', { message: `Room "${data.id}" not found`, roomMembers: getRoomMembers(data.id) });
         }
