@@ -2,6 +2,8 @@ import express, { Express, Request, Response } from 'express';
 import * as http from 'http';
 import * as socketio from 'socket.io';
 import dotenv from 'dotenv';
+import { v4 as uuidv4 } from 'uuid';
+
 const axios = require('axios');
 const port: number = parseInt(process.env.PORT || '3200', 10);
 
@@ -442,7 +444,11 @@ const checkMemberBeforeStartGame = (roomId: string): boolean => {
 };
 
 const generateRoomId = (): string => {
-    return Math.random().toString(36).substring(2, 11);
+    let roomId: string;
+    do {
+        roomId = uuidv4().replace(/-/g, '').substring(0, 10); 
+    } while (rooms.some(room => room.id === roomId));
+    return roomId;
 };
 
 const getRewardFromBot = (userId: string): number => {
