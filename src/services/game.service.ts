@@ -1,13 +1,13 @@
 import { Room } from '../models/room.model';
 import { PokerGame } from './poker.service';
 import { getRoomMembers, getRoomMembersName, generateSessionId } from '../utils/game.utils';
-import { getUserById, removeUserBySocketId } from './user.service';
+import { getUserInfo, getUserInfo as getUserBySocketId } from './user.service';
 import { Server, Socket } from 'socket.io';
 import { MAX_COEFFICIENT, BOT_ID, APP_ID } from '../config/constants';
 import { sendRewards } from './reward.service';
 
-const roomGames: Record<string, PokerGame> = {};
-let playerRanks: any[] = [];
+export const roomGames: Record<string, PokerGame> = {};
+export let playerRanks: any[] = [];
 
 export const dealCards = (io: Server, room: Room) => {
   const game = new PokerGame();
@@ -18,7 +18,7 @@ export const dealCards = (io: Server, room: Room) => {
   game._playerName = getRoomMembersName(room);
   game.takePoker(game._playersNum);
 
-  playerRanks = game.determineWinner(members.map(id => getUserById(id)!).filter(Boolean));
+  playerRanks = game.determineWinner(members.map(id => getUserBySocketId(id)!).filter(Boolean));
   room.isPlaying = true;
 
   io.to(room.id).emit('startedGame', {
@@ -31,7 +31,7 @@ export const handleBetResults = async (io: Server, room: Room) => {
   const game = roomGames[room.id];
   if (!game) return;
 
-  const medalHolder = getUserById(room.medalHolder);
+  const medalHolder = getUserBySocketId(room.medalHolder);
   if (!medalHolder) return;
 
   const updates: { userId: string; wallet: number }[] = [];
@@ -53,62 +53,6 @@ export const handleBetResults = async (io: Server, room: Room) => {
 
   await sendRewards(room.sessionId, userRewards);
   io.to(room.id).emit('playerWalletUpdated', updates);
-};
-
-export const startGame = (io: Server, socket: Socket, room: Room) => {
-  const owner = getUserById(room.owner);
-  if (!owner || owner.wallet < room.betAmount * MAX_COEFFICIENT * (room.members.length - 1)) {
-    io.to(room.id).emit('status', { message: 'Owner does not have enough tokens' });
-    return;
-  }
-
-  const insufficient = room.members.some(id => {
-    const user = getUserById(id);
-    return !user || user.wallet < (id === room.medalHolder ? room.betAmount * MAX_COEFFICIENT * (room.members.length - 1) : room.betAmount * MAX_COEFFICIENT);
-  });
-
-  if (insufficient) {
-    io.to(room.id).emit('status', { message: 'Some members do not have enough tokens' });
-    return;
-  }
-
-  room.sessionId = generateSessionId();
-  room.allUserConfirmed = true;
-  room.userConfirmed = [];
-
-  for (const memberId of room.members) {
-    const user = getUserById(memberId);
-    if (!user) continue;
-    const amount = memberId === room.medalHolder
-      ? room.betAmount * MAX_COEFFICIENT * (room.members.length - 1)
-      : room.betAmount * MAX_COEFFICIENT;
-    user.wallet -= amount;
-    io.to(user.socketId).emit('startBet', {
-      gameId: room.id,
-      totalBet: amount,
-      receiverId: BOT_ID,
-      appId: APP_ID,
-      currentGameId: room.sessionId,
-    });
-  }
-
-  setTimeout(() => {
-    if (room.allUserConfirmed || room.userConfirmed.length === room.members.length) {
-      dealCards(io, room);
-    } else {
-      io.to(room.id).emit('userConfirmed', { message: 'Not all users confirmed' });
-      const refunds: { userId: string, amount: number }[] = [];
-      for (const uid of room.userConfirmed) {
-        const user = getUserById(uid);
-        if (user) {
-          const refund = room.betAmount * MAX_COEFFICIENT;
-          user.wallet += refund;
-          refunds.push({ userId: uid, amount: refund });
-        }
-      }
-      sendRewards(room.sessionId, refunds);
-    }
-  }, 10000);
 };
 
 export const leaveRoom = (io: Server, room: Room, userId: string) => {
@@ -133,15 +77,3 @@ export const leaveRoom = (io: Server, room: Room, userId: string) => {
   });
 };
 
-export const handleDisconnect = (io: Server, socket: Socket, rooms: Room[]) => {
-  const user = getUserById(socket.id);
-  if (!user) return;
-
-  rooms.forEach(room => {
-    if (room.members.includes(user.id)) {
-      leaveRoom(io, room, user.id);
-    }
-  });
-
-  removeUserBySocketId(socket.id);
-};

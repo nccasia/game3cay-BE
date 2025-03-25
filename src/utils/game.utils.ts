@@ -1,5 +1,5 @@
 import { Room } from '../models/room.model';
-import { getUserById } from '../services/user.service';
+import { getUserInfo } from '../services/user.service';
 
 export const getRoomMembers = (room: Room): string[] => {
   return room.members;
@@ -7,7 +7,7 @@ export const getRoomMembers = (room: Room): string[] => {
 
 export const getRoomMembersName = (room: Room): string[] => {
   return room.members
-    .map(id => getUserById(id)?.username || '')
+    .map(id => getUserInfo(id)?.username || '')
     .filter(name => name !== '');
 };
 

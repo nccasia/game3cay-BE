@@ -23,14 +23,16 @@ export const handleAgreeGame = (io: Server, socket: Socket, data: any) => {
   });
 };
 
-export const handleUserConfirmBet = (io: Server, socket: Socket, data: any) => {
+export const handleConfirmBet = (io: Server, socket: Socket, data: any) => {
   const room = findRoomById(data.roomId);
-  if (!room) return;
-  room.userConfirmed.push(data.userId);
+  if (room && !room.userConfirmed.includes(data.userId)) {
+    room.userConfirmed.push(data.userId);
+  }
 };
 
-export const handleUserCancelBet = (io: Server, socket: Socket, data: any) => {
+export const handleCancelBet = (io: Server, socket: Socket, data: any) => {
   const room = findRoomById(data.roomId);
-  if (!room) return;
-  room.allUserConfirmed = false;
+  if (room) {
+    room.allUserConfirmed = false;
+  }
 };
