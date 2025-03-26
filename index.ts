@@ -3,6 +3,8 @@ import * as http from 'http';
 import * as socketio from 'socket.io';
 import dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
+import { addMoneyForUser, deductMoneyForUser, getMoneyForUser } from './src/services/externalUser.service';
+import { IOInteract } from './src/socket/IOInstance';
 
 const axios = require('axios');
 const port: number = parseInt(process.env.PORT || '3200', 10);
@@ -24,7 +26,37 @@ app.get('/hello', async (_: Request, res: Response) => {
     res.send('Hello World')
 });
 
-interface User {
+app.use(express.json()); // Đảm bảo bạn có body parser
+
+app.post('/swap-token', (req: Request, res: Response) => {
+  const { userId, value } = req.body;
+
+  if (!userId || !value || isNaN(value)) {
+    return res.status(400).json({ message: 'Invalid parameters' });
+  }
+
+  IOInteract.instance.getBalance(userId, (balanceData) => {
+    if (balanceData.status !== 0) {
+      return res.status(400).json({ message: balanceData.message });
+    }
+
+    if (balanceData.data.balance < value) {
+      return res.status(400).json({ message: 'Bạn không đủ mezon token để đổi!' });
+    }
+
+    IOInteract.instance.swapToken(userId, value, (swapResult) => {
+      if (swapResult.status === 0) {
+        return res.status(200).json({ balance: swapResult.data.balance });
+      } else {
+        return res.status(400).json({ message: swapResult.message });
+      }
+    });
+  });
+});
+
+IOInteract.instance.connect();
+
+export interface User {
     id: string;
     username: string;
     displayName: string;
@@ -34,7 +66,7 @@ interface User {
     socketId: string;
 }
 
-const users: User[] = [];
+export const users: User[] = [];
 
 const addUser = (id: string, username: string, displayName: string, wallet: number, avatarUrl: string, email: string, socketId: string) => {
     const user: User = { id, username, displayName, wallet, socketId, avatarUrl, email };
@@ -152,6 +184,7 @@ const joinRoom = (roomId: string, userInfo: User): boolean => {
             room.medalHolder = userInfo.id;
         }
         pokerGame._playerName = room.members;
+        getMoneyForUser(userInfo);
         return true;
     }
     return false;
@@ -199,7 +232,8 @@ const handleBetResults = (roomId: string, playerScores: { id: string, score: num
         const calculateRewardOrPenalty = (condition: boolean, rewardMultiplier: number, penaltyMultiplier: number) => {
             const amount = room.betAmount * (maxCoefficient + (condition ? rewardMultiplier : -penaltyMultiplier));
             userRewards.push({ userId: player.userInfo.id, amount });
-            player.userInfo.wallet += amount;
+            // player.userInfo.wallet += amount;
+            amount >= 0 ? addMoneyForUser(player.userInfo, amount) : deductMoneyForUser(player.userInfo, amount)
             ownerWinCount += condition ? -rewardMultiplier : penaltyMultiplier;
         };
 
@@ -228,7 +262,8 @@ const handleBetResults = (roomId: string, playerScores: { id: string, score: num
 
     const medalHolderReward = room.betAmount * maxCoefficient * (room.members.length - 1) + (ownerWinCount * room.betAmount);
     userRewards.push({ userId: medalHolder.id, amount: medalHolderReward });
-    medalHolder.wallet += medalHolderReward;
+    // medalHolder.wallet += medalHolderReward;
+    medalHolderReward >= 0 ? addMoneyForUser(medalHolder, medalHolderReward) : deductMoneyForUser(medalHolder, medalHolderReward)
     getRewardWinnerWithArray(room.sessionId, userRewards);
 
     // Send updated wallets
@@ -733,6 +768,7 @@ io.on('connection', (socket) => {
                         currentGameId: room.sessionId,
                     });
                     user.wallet -= room.betAmount * maxCoefficient;
+                    deductMoneyForUser(user, room.betAmount * maxCoefficient);
                 } else {
                     io.to(user.socketId).emit("startBet", {
                         gameId: room.id,
@@ -742,6 +778,7 @@ io.on('connection', (socket) => {
                         currentGameId: room.sessionId,
                     });
                     user.wallet -= room.betAmount * maxCoefficient * (room.members.length - 1);
+                    deductMoneyForUser(user, room.betAmount * maxCoefficient * (room.members.length - 1));
                 }
             }
         });
@@ -760,6 +797,7 @@ io.on('connection', (socket) => {
                     if (user) {
                         userRewards.push({ userId: user.id, amount: room.betAmount * maxCoefficient });
                         user.wallet += room.betAmount * maxCoefficient;
+                        addMoneyForUser(user, room.betAmount * maxCoefficient);
                     }
                 }
                 getRewardWinnerWithArray(room.sessionId, userRewards);
