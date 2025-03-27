@@ -1,7 +1,8 @@
 import { IOReturn, Status } from '../models/io.model';
 import { Server } from 'socket.io';
 import { IOInteract } from '../socket/IOInstance';
-import { User, users } from '../..';
+import { users } from '..';
+import { User } from '../models/user.model';
 
 export const handleGetBalance = (clientSocketId: string) => {
   for (let i = 0; i < users.length; i++) {
@@ -13,7 +14,7 @@ export const handleGetBalance = (clientSocketId: string) => {
         if (returnData.status === Status.Success) {
           socket.emit('balance', returnData.data.balance);
         } else {
-          socket.emit('warning', { message: returnData.message });
+          socket.emit('status', { message: returnData.message });
         }
       });
     }
@@ -26,7 +27,7 @@ export const getMoneyForUser = (user: User) => {
       user.wallet = returnData.data.balance;
     } else {
       const socket = IOInteract.instance.socket;
-      if (socket) socket.emit('warning', { message: returnData.message });
+      if (socket) socket.emit('status', { message: returnData.message });
     }
   });
 };
@@ -37,7 +38,7 @@ export const deductMoneyForUser = (user: User, amount: number) => {
       user.wallet = returnData.data.balance;
     } else {
       const socket = IOInteract.instance.socket;
-      if (socket) socket.emit('warning', { message: returnData.message });
+      if (socket) socket.emit('status', { message: returnData.message });
     }
   });
 };
@@ -48,7 +49,7 @@ export const addMoneyForUser = (user: User, amount: number) => {
       user.wallet = returnData.data.balance;
     } else {
       const socket = IOInteract.instance.socket;
-      if (socket) socket.emit('warning', { message: returnData.message });
+      if (socket) socket.emit('status', { message: returnData.message });
     }
   });
 };

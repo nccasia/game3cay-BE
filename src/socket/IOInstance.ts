@@ -4,12 +4,12 @@ import { IOReturn } from "../models/io.model";
 require('dotenv').config();
 
 export class IOInteract {
-    private static _instance: IOInteract = new this;
+    private static _instance: IOInteract = new IOInteract();
     public static get instance(): IOInteract {
         return this._instance
     }
     // socket = io("http://10.10.41.239:3001"); local
-    socket = io("http://localhost:5012/", { secure: true, transports: ['websocket'] });
+    socket = io("https://socketgameuser-server.nccsoft.vn", { secure: true, transports: ['websocket'] });
     hash = process.env.REACT_APP_HASH
 
     connect() {
@@ -47,14 +47,16 @@ export class IOInteract {
         })
     }
     getBalance(user: string, onSuccess: (response: IOReturn) => void) {
+        console.log(`getBalance:${user} ${this.hash}`);
         this.socket.emit('getBalance', { user: user, hash: this.hash }, (callbackData: any) => {
             onSuccess(callbackData)
         })
     }
     swapToken(user: string, value: number, onSuccess: (response: IOReturn) => void) {
-        this.socket.emit('swapToken', { user: user, value: value, hash: this.hash }, (callbackData: IOReturn) => {
-            onSuccess(callbackData)
-        })
+        console.log(`swaptoken:${user} ${value}`);
+        // this.socket.emit('swapToken', { user: user, value: value, hash: this.hash }, (callbackData: IOReturn) => {
+        //     onSuccess(callbackData)
+        // })
     }
 }
 

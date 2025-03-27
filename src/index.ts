@@ -3,8 +3,10 @@ import * as http from 'http';
 import * as socketio from 'socket.io';
 import dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
-import { addMoneyForUser, deductMoneyForUser, getMoneyForUser } from './src/services/externalUser.service';
-import { IOInteract } from './src/socket/IOInstance';
+import { addMoneyForUser, deductMoneyForUser, getMoneyForUser, handleGetBalance } from './services/externalUser.service';
+import { IOInteract } from './socket/IOInstance';
+import { User } from './models/user.model';
+import { Room } from './models/room.model';
 
 const axios = require('axios');
 const port: number = parseInt(process.env.PORT || '3200', 10);
@@ -13,6 +15,7 @@ const app: Express = express();
 const server: http.Server = http.createServer(app);
 const io: socketio.Server = new socketio.Server();
 
+console.log('asdasdasd ' + process.env.FE_URL);
 io.attach(server, {
     cors: {
         origin: process.env.FE_URL || "http://localhost:3200",
@@ -30,12 +33,13 @@ app.use(express.json()); // Đảm bảo bạn có body parser
 
 app.post('/swap-token', (req: Request, res: Response) => {
   const { userId, value } = req.body;
-
+  console.log(`swaptoken:${userId} ${value}`);
   if (!userId || !value || isNaN(value)) {
     return res.status(400).json({ message: 'Invalid parameters' });
   }
-
+  console.log(`swap-token1231231:${userId}`);
   IOInteract.instance.getBalance(userId, (balanceData) => {
+    console.log(`getBalance1231231:${userId} ${balanceData}`);
     if (balanceData.status !== 0) {
       return res.status(400).json({ message: balanceData.message });
     }
@@ -56,15 +60,7 @@ app.post('/swap-token', (req: Request, res: Response) => {
 
 IOInteract.instance.connect();
 
-export interface User {
-    id: string;
-    username: string;
-    displayName: string;
-    wallet: number;
-    avatarUrl: string;
-    email: string;
-    socketId: string;
-}
+
 
 export const users: User[] = [];
 
@@ -123,21 +119,6 @@ const disconnectUser = (socketId: string) => {
         users.splice(index, 1);
     }
 };
-
-interface Room {
-    id: string;
-    name: string;
-    wallet: number;
-    members: string[];
-    isPlaying: boolean;
-    owner: string;
-    readyPlayer: string[];
-    medalHolder: string;
-    sessionId: string;
-    betAmount: number;
-    allUserConfirmed: boolean;
-    userConfirmed: string[];
-}
 
 const rooms: Room[] = [];
 const roomGames: { [roomId: string]: PokerGame } = {};
@@ -264,7 +245,7 @@ const handleBetResults = (roomId: string, playerScores: { id: string, score: num
     userRewards.push({ userId: medalHolder.id, amount: medalHolderReward });
     // medalHolder.wallet += medalHolderReward;
     medalHolderReward >= 0 ? addMoneyForUser(medalHolder, medalHolderReward) : deductMoneyForUser(medalHolder, medalHolderReward)
-    getRewardWinnerWithArray(room.sessionId, userRewards);
+    // getRewardWinnerWithArray(room.sessionId, userRewards);
 
     // Send updated wallets
     io.to(room.id).emit('playerWalletUpdated', playerWalletUpdates);
@@ -468,7 +449,7 @@ class PokerGame {
 
 const pokerGame = new PokerGame();
 
-const getRoomMembers = (roomId: string): string[] | undefined => {
+export const getRoomMembers = (roomId: string): string[] | undefined => {
     const room = rooms.find(room => room.id === roomId);
     return room ? room.members : undefined;
 };
@@ -714,6 +695,11 @@ io.on('connection', (socket) => {
         if (room) room.userConfirmed.push(data.userId);
     });
 
+    socket.on('getBalance', (data) => {
+        handleGetBalance(data.userInfo.socketId);
+    });
+
+
     socket.on('startGame', (data) => {
         const room = rooms.find(room => room.id === data.roomId);
         if (!room) {
@@ -755,57 +741,57 @@ io.on('connection', (socket) => {
         room.userConfirmed = [];
         room.sessionId = generateSessionId();
 
-        const roomMembers = getRoomMembers(data.roomId);
-        roomMembers?.forEach(memberId => {
-            const user = getUserInfo(memberId);
-            if (user) {
-                if (user.id !== room.medalHolder) {
-                    io.to(user.socketId).emit("startBet", {
-                        gameId: room.id,
-                        totalBet: room.betAmount * maxCoefficient,
-                        receiverId: BOT_ID,
-                        appId: APP_ID,
-                        currentGameId: room.sessionId,
-                    });
-                    user.wallet -= room.betAmount * maxCoefficient;
-                    deductMoneyForUser(user, room.betAmount * maxCoefficient);
-                } else {
-                    io.to(user.socketId).emit("startBet", {
-                        gameId: room.id,
-                        totalBet: room.betAmount * maxCoefficient * (room.members.length - 1),
-                        receiverId: BOT_ID,
-                        appId: APP_ID,
-                        currentGameId: room.sessionId,
-                    });
-                    user.wallet -= room.betAmount * maxCoefficient * (room.members.length - 1);
-                    deductMoneyForUser(user, room.betAmount * maxCoefficient * (room.members.length - 1));
-                }
-            }
-        });
+        // const roomMembers = getRoomMembers(data.roomId);
+        // roomMembers?.forEach(memberId => {
+        //     const user = getUserInfo(memberId);
+        //     if (user) {
+        //         if (user.id !== room.medalHolder) {
+        //             io.to(user.socketId).emit("startBet", {
+        //                 gameId: room.id,
+        //                 totalBet: room.betAmount * maxCoefficient,
+        //                 receiverId: BOT_ID,
+        //                 appId: APP_ID,
+        //                 currentGameId: room.sessionId,
+        //             });
+        //             user.wallet -= room.betAmount * maxCoefficient;
+        //             deductMoneyForUser(user, room.betAmount * maxCoefficient);
+        //         } else {
+        //             io.to(user.socketId).emit("startBet", {
+        //                 gameId: room.id,
+        //                 totalBet: room.betAmount * maxCoefficient * (room.members.length - 1),
+        //                 receiverId: BOT_ID,
+        //                 appId: APP_ID,
+        //                 currentGameId: room.sessionId,
+        //             });
+        //             user.wallet -= room.betAmount * maxCoefficient * (room.members.length - 1);
+        //             deductMoneyForUser(user, room.betAmount * maxCoefficient * (room.members.length - 1));
+        //         }
+        //     }
+        // });
 
-        setTimeout(() => {
-            const room = rooms.find(room => room.id === data.roomId);
-            if (!room) return;
-            console.log('All users confirmed:', room.allUserConfirmed);
-            if (room.allUserConfirmed || room.userConfirmed.length === room.members.length) {
-                dealCards(data.roomId);
-            } else {
-                io.to(room?.id).emit('userConfirmed', { message: 'Not all users confirmed' });
-                const userRewards: { userId: string, amount: number }[] = [];
-                for (let i = 0; i < room.userConfirmed.length; i++) {
-                    const user = getUserInfo(room.userConfirmed[i]);
-                    if (user) {
-                        userRewards.push({ userId: user.id, amount: room.betAmount * maxCoefficient });
-                        user.wallet += room.betAmount * maxCoefficient;
-                        addMoneyForUser(user, room.betAmount * maxCoefficient);
-                    }
-                }
-                getRewardWinnerWithArray(room.sessionId, userRewards);
-            }
-        }, 10000);
+        // setTimeout(() => {
+        //     const room = rooms.find(room => room.id === data.roomId);
+        //     if (!room) return;
+        //     console.log('All users confirmed:', room.allUserConfirmed);
+        //     if (room.allUserConfirmed || room.userConfirmed.length === room.members.length) {
+        //         dealCards(data.roomId);
+        //     } else {
+        //         io.to(room?.id).emit('userConfirmed', { message: 'Not all users confirmed' });
+        //         const userRewards: { userId: string, amount: number }[] = [];
+        //         for (let i = 0; i < room.userConfirmed.length; i++) {
+        //             const user = getUserInfo(room.userConfirmed[i]);
+        //             if (user) {
+        //                 userRewards.push({ userId: user.id, amount: room.betAmount * maxCoefficient });
+        //                 user.wallet += room.betAmount * maxCoefficient;
+        //                 addMoneyForUser(user, room.betAmount * maxCoefficient);
+        //             }
+        //         }
+        //         getRewardWinnerWithArray(room.sessionId, userRewards);
+        //     }
+        // }, 10000);
     });
 
 });
 server.listen(port, () => {
-    console.log('> Ready on http://localhost:${port}');
+    console.log(`> Ready on http://localhost:${port}`);
 });
