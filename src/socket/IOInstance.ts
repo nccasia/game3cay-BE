@@ -9,7 +9,7 @@ export class IOInteract {
         return this._instance
     }
     // socket = io("http://10.10.41.239:3001"); local
-    socket = io("https://socketgameuser-server.nccsoft.vn", { secure: true, transports: ['websocket'] });
+    socket = io(process.env.MEZON_URL || "http://10.10.41.239:3001", { secure: true, transports: ['websocket'] });
     hash = process.env.REACT_APP_HASH
 
     connect() {

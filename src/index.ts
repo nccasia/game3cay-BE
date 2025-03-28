@@ -13,12 +13,11 @@ const port: number = parseInt(process.env.PORT || '3200', 10);
 
 const app: Express = express();
 const server: http.Server = http.createServer(app);
-const io: socketio.Server = new socketio.Server();
+export const ioToFe: socketio.Server = new socketio.Server();
 
-console.log('asdasdasd ' + process.env.FE_URL);
-io.attach(server, {
+ioToFe.attach(server, {
     cors: {
-        origin: process.env.FE_URL || "http://localhost:3200",
+        origin: process.env.URL || "http://localhost:3200",
         methods: ["GET", "POST"],
         allowedHeaders: ["my-custom-header", "Access-Control-Allow-Origin"],
         credentials: true
@@ -67,6 +66,7 @@ export const users: User[] = [];
 const addUser = (id: string, username: string, displayName: string, wallet: number, avatarUrl: string, email: string, socketId: string) => {
     const user: User = { id, username, displayName, wallet, socketId, avatarUrl, email };
     users.push(user);
+    getMoneyForUser(user);
 };
 
 const dealCards = (roomId: string) => {
@@ -83,7 +83,7 @@ const dealCards = (roomId: string) => {
 
     room.isPlaying = true;
     console.log('Session ID:', room.sessionId);
-    io.to(roomId).emit('startedGame', {
+    ioToFe.to(roomId).emit('startedGame', {
         playerHoleCards,
         playerRanks,
     });
@@ -248,7 +248,7 @@ const handleBetResults = (roomId: string, playerScores: { id: string, score: num
     // getRewardWinnerWithArray(room.sessionId, userRewards);
 
     // Send updated wallets
-    io.to(room.id).emit('playerWalletUpdated', playerWalletUpdates);
+    ioToFe.to(room.id).emit('playerWalletUpdated', playerWalletUpdates);
 
     // Update the medal holder
     const winner = playerScores.sort((a, b) => b.score - a.score)[0];
@@ -256,7 +256,7 @@ const handleBetResults = (roomId: string, playerScores: { id: string, score: num
         room.readyPlayer = room.readyPlayer.filter(player => player !== room.owner);
         room.medalHolder = winner.id;
         room.owner = winner.id;
-        io.to(room.id).emit('updateOwner', { roomOwner: room.owner, roomMembers: room.members });
+        ioToFe.to(room.id).emit('updateOwner', { roomOwner: room.owner, roomMembers: room.members });
     }
 };
 
@@ -266,7 +266,7 @@ const leaveRoom = (roomId: string, userId: string): boolean => {
         room.members = room.members.filter(member => member !== userId);
         room.readyPlayer = room.readyPlayer.filter(player => player !== userId);
         if (room.owner === userId && room.members.length > 0) {
-            io.to(room.id).emit('updateOwner', { roomOwner: room.members[0], roomMembers: room.members });
+            ioToFe.to(room.id).emit('updateOwner', { roomOwner: room.members[0], roomMembers: room.members });
             room.owner = room.members[0];
         }
         if (room.members.length === 0) {
@@ -525,7 +525,7 @@ const getRewardWinner = async (currentGameId: string, userId: string, amount: nu
     }
 };
 
-io.on('connection', (socket) => {
+ioToFe.on('connection', (socket) => {
     if (socket && socket.id) {
         console.log(`Client connected: ${socket.id}`);
     } else {
@@ -539,7 +539,7 @@ io.on('connection', (socket) => {
             }
         }
     });
-    io.emit('listRoom', rooms);
+    ioToFe.emit('listRoom', rooms);
 
     socket.on('disconnect', () => {
         const user = getUserBySocketId(socket.id);
@@ -548,7 +548,7 @@ io.on('connection', (socket) => {
                 if (room.members.includes(user.id)) {
                     leaveRoom(room.id, user.id);
                     socket.leave(room.id);
-                    io.to(room.id).emit('roomLeft', { message: `User "${user.username}" left the room`, roomMembers: getRoomMembers(room.id) });
+                    ioToFe.to(room.id).emit('roomLeft', { message: `User "${user.username}" left the room`, roomMembers: getRoomMembers(room.id) });
                 }
             });
         }
@@ -562,10 +562,10 @@ io.on('connection', (socket) => {
             return;
         }
         if (leaveRoom(data.id, data.userId)) {
-            io.to(data.id).emit('roomLeft', { message: `Room "${data.id}" left successfully`, roomMembers: getRoomMembers(data.id) });
+            ioToFe.to(data.id).emit('roomLeft', { message: `Room "${data.id}" left successfully`, roomMembers: getRoomMembers(data.id) });
             socket.leave(data.id);
         } else {
-            io.to(data.id).emit('roomLeft', { message: `Room "${data.id}" not found`, roomMembers: getRoomMembers(data.id) });
+            ioToFe.to(data.id).emit('roomLeft', { message: `Room "${data.id}" not found`, roomMembers: getRoomMembers(data.id) });
         }
         rooms.forEach(room => {
             if (room.members.length === 0) {
@@ -576,11 +576,11 @@ io.on('connection', (socket) => {
             } else if (room.owner === data.userId) {
                 console.log('Owner left the room:', room.id);
                 room.owner = room.members[0];
-                io.to(room.id).emit('playerReady', { owner: room.owner, readyPlayer: room.readyPlayer });
+                ioToFe.to(room.id).emit('playerReady', { owner: room.owner, readyPlayer: room.readyPlayer });
             }
         });
         console.log('Rooms index:', rooms);
-        io.emit('listRoom', rooms);
+        ioToFe.emit('listRoom', rooms);
     });
 
     socket.on('agreeGame', (data) => {
@@ -595,7 +595,7 @@ io.on('connection', (socket) => {
 
             if (!room.readyPlayer.includes(room.owner)) room.readyPlayer.push(room.owner);
             console.log('Player ready 4:', data.userId, room.readyPlayer);
-            io.to(data.roomId).emit('playerReady', { owner: room.owner, readyPlayer: room.readyPlayer });
+            ioToFe.to(data.roomId).emit('playerReady', { owner: room.owner, readyPlayer: room.readyPlayer });
         } else {
             console.log(`Room ${data.roomId} not found`);
         }
@@ -640,7 +640,7 @@ io.on('connection', (socket) => {
     socket.on('createRoom', (data) => {
         const room = createRoom(data.name, socket, data.betAmount);
         socket.emit('roomCreated', room.id);
-        io.emit('listRoom', rooms);
+        ioToFe.emit('listRoom', rooms);
     });
 
     socket.on('joinRoom', (data) => {
@@ -675,7 +675,7 @@ io.on('connection', (socket) => {
         }
         console.log(`User ${data.userInfo.username} joined room ${data.roomId}`);
 
-        io.to(data.roomId).emit('roomJoined', {
+        ioToFe.to(data.roomId).emit('roomJoined', {
             message: roomJoined ? `Room "${data.roomId}" joined successfully` : `Room "${data.roomId}" not found`,
             roomId: data.roomId,
             roomMembers,
@@ -703,23 +703,23 @@ io.on('connection', (socket) => {
     socket.on('startGame', (data) => {
         const room = rooms.find(room => room.id === data.roomId);
         if (!room) {
-            io.to(socket.id).emit('status', { message: 'Room not found' });
+            ioToFe.to(socket.id).emit('status', { message: 'Room not found' });
             return;
         }
 
         if (room.members.length == 1) {
-            io.to(room.id).emit('status', { message: 'Not enough players' });
+            ioToFe.to(room.id).emit('status', { message: 'Not enough players' });
             return;
         }
 
         if (room.readyPlayer.length !== room.members.length) {
-            io.to(room.id).emit('status', { message: 'Not all players are ready', });
+            ioToFe.to(room.id).emit('status', { message: 'Not all players are ready', });
             return;
         }
 
         const owner = getUserInfo(room.owner);
         if (!owner || owner.wallet < room.betAmount * maxCoefficient * (room.members.length - 1)) {
-            io.to(room.id).emit('status', { message: 'Owner does not have enough tokens' });
+            ioToFe.to(room.id).emit('status', { message: 'Owner does not have enough tokens' });
             return;
         }
 
@@ -729,7 +729,7 @@ io.on('connection', (socket) => {
         });
 
         if (insufficientFunds) {
-            io.to(room.id).emit('status', { message: 'Some members do not have enough tokens' });
+            ioToFe.to(room.id).emit('status', { message: 'Some members do not have enough tokens' });
             return;
         }
 
