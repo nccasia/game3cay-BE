@@ -705,7 +705,7 @@ ioToFe.on('connection', (socket) => {
     });
 
     socket.on('getBalance', (data) => {
-        handleGetBalance(data.userInfo.socketId);
+        handleGetBalance(data.userInfo.id);
     });
 
 
