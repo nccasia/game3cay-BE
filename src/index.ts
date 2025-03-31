@@ -740,7 +740,7 @@ ioToFe.on('connection', (socket) => {
         room.allUserConfirmed = true;
         room.userConfirmed = [];
         room.sessionId = generateSessionId();
-
+        
         // const roomMembers = getRoomMembers(data.roomId);
         // roomMembers?.forEach(memberId => {
         //     const user = getUserInfo(memberId);
@@ -789,7 +789,9 @@ ioToFe.on('connection', (socket) => {
         //         getRewardWinnerWithArray(room.sessionId, userRewards);
         //     }
         // }, 10000);
+        dealCards(data.roomId);
     });
+    
 
 });
 server.listen(port, () => {
