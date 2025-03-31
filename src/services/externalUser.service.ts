@@ -21,13 +21,14 @@ export const handleGetBalance = (clientSocketId: string) => {
 
 export const getMoneyForUser = (user: User) => {
   IOInteract.instance.getBalance(user.id, (returnData: IOReturn) => {
-    console.log(`getBalance:${user} ${returnData.status} ${returnData.data.balance}`);
+    console.log(`getBalance:${user.username} ${returnData.status} ${returnData.data.balance}`);
 
 
     if (returnData.status === Status.Success) {
       user.wallet = returnData.data.balance;
       ioToFe.emit('balance', returnData.data.balance);
     } else {
+      ioToFe.emit('balance', 0);
       ioToFe.emit('status', { message: returnData.message });
     }
   });
@@ -35,6 +36,7 @@ export const getMoneyForUser = (user: User) => {
 
 export const deductMoneyForUser = (user: User, amount: number) => {
   IOInteract.instance.deductBalance(user.id, amount, (returnData: IOReturn) => {
+    console.log(`deductMoneyForUser:${user.username} ${returnData.status} ${returnData.data.balance}`);
     if (returnData.status === Status.Success) {
       user.wallet = returnData.data.balance;
     } else {
@@ -45,6 +47,7 @@ export const deductMoneyForUser = (user: User, amount: number) => {
 
 export const addMoneyForUser = (user: User, amount: number) => {
   IOInteract.instance.addBalance(user.id, amount, (returnData: IOReturn) => {
+    console.log(`addMoneyForUser:${user.username} ${returnData.status} ${returnData.data.balance}`);
     if (returnData.status === Status.Success) {
       user.wallet = returnData.data.balance;
     } else {
