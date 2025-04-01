@@ -1,11 +1,16 @@
 {
     "compilerOptions": {
-        "target": "es6",
-        "module": "commonjs",
-        "rootDir": "./",
-        "outDir": "./build",
-        "esModuleInterop": true,
-        "strict": true,
-        "allowSyntheticDefaultImports": true
-    }
-}
+      "target": "es2021",
+      "module": "commonjs",
+      "lib": ["es2021"],
+      "rootDir": "src", 
+      "outDir": "build",          // 👈 biên dịch ra đây
+      "esModuleInterop": true,
+      "strict": true,
+      "moduleResolution": "node",
+      "resolveJsonModule": true,
+      "skipLibCheck": true
+    },
+    "include": ["src/**/*"],      // 👈 chỉ biên dịch các file trong src
+    "exclude": ["node_modules"]
+  }
