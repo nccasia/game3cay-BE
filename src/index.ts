@@ -3,17 +3,21 @@ import * as http from 'http';
 import * as socketio from 'socket.io';
 import dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
+import { addMoneyForUser, deductMoneyForUser, getMoneyForUser, handleGetBalance } from './services/externalUser.service';
+import { IOInteract } from './socket/IOInstance';
+import { User } from './models/user.model';
+import { Room } from './models/room.model';
 
 const axios = require('axios');
 const port: number = parseInt(process.env.PORT || '3200', 10);
 
 const app: Express = express();
 const server: http.Server = http.createServer(app);
-const io: socketio.Server = new socketio.Server();
+export const ioToFe: socketio.Server = new socketio.Server();
 
-io.attach(server, {
+ioToFe.attach(server, {
     cors: {
-        origin: process.env.FE_URL || "http://localhost:3200",
+        origin: process.env.URL || "http://localhost:3200",
         methods: ["GET", "POST"],
         allowedHeaders: ["my-custom-header", "Access-Control-Allow-Origin"],
         credentials: true
@@ -24,21 +28,45 @@ app.get('/hello', async (_: Request, res: Response) => {
     res.send('Hello World')
 });
 
-interface User {
-    id: string;
-    username: string;
-    displayName: string;
-    wallet: number;
-    avatarUrl: string;
-    email: string;
-    socketId: string;
-}
+app.use(express.json()); // Đảm bảo bạn có body parser
 
-const users: User[] = [];
+app.post('/swap-token', (req: Request, res: Response) => {
+    const { userId, value } = req.body;
+    console.log(`swaptoken:${userId} ${value}`);
+    if (!userId || !value || isNaN(value)) {
+        return res.status(400).json({ message: 'Invalid parameters' });
+    }
+    console.log(`swap-token1231231:${userId}`);
+    IOInteract.instance.getBalance(userId, (balanceData) => {
+        console.log(`getBalance1231231:${userId} ${balanceData}`);
+        if (balanceData.status !== 0) {
+            return res.status(400).json({ message: balanceData.message });
+        }
+
+        if (balanceData.data.balance < value) {
+            return res.status(400).json({ message: 'Bạn không đủ mezon token để đổi!' });
+        }
+
+        IOInteract.instance.swapToken(userId, value, (swapResult) => {
+            if (swapResult.status === 0) {
+                return res.status(200).json({ balance: swapResult.data.balance });
+            } else {
+                return res.status(400).json({ message: swapResult.message });
+            }
+        });
+    });
+});
+
+IOInteract.instance.connect();
+
+
+
+export const users: User[] = [];
 
 const addUser = (id: string, username: string, displayName: string, wallet: number, avatarUrl: string, email: string, socketId: string) => {
     const user: User = { id, username, displayName, wallet, socketId, avatarUrl, email };
     users.push(user);
+    getMoneyForUser(user);
 };
 
 const dealCards = (roomId: string) => {
@@ -55,7 +83,7 @@ const dealCards = (roomId: string) => {
 
     room.isPlaying = true;
     console.log('Session ID:', room.sessionId);
-    io.to(roomId).emit('startedGame', {
+    ioToFe.to(roomId).emit('startedGame', {
         playerHoleCards,
         playerRanks,
     });
@@ -92,21 +120,6 @@ const disconnectUser = (socketId: string) => {
     }
 };
 
-interface Room {
-    id: string;
-    name: string;
-    wallet: number;
-    members: string[];
-    isPlaying: boolean;
-    owner: string;
-    readyPlayer: string[];
-    medalHolder: string;
-    sessionId: string;
-    betAmount: number;
-    allUserConfirmed: boolean;
-    userConfirmed: string[];
-}
-
 const rooms: Room[] = [];
 const roomGames: { [roomId: string]: PokerGame } = {};
 let playerRanks: { score: number; card: { suit: string; point: number }; index: number; name: string; rank: number, userInfo: User }[] = [];
@@ -138,11 +151,12 @@ const joinRoom = (roomId: string, userInfo: User): boolean => {
     if (!room) return false;
 
     if (room.isPlaying) {
-        console.log(`Room ${roomId} is already in a game.`);
+        console.log(`Phòng ${roomId} đã bắt đầu mất rồi.`);
         return false;
     }
 
     const user = getUserInfo(userInfo.id);
+
     if (!user) users.push(userInfo);
 
     if (!room.members.includes(userInfo.id)) {
@@ -152,6 +166,7 @@ const joinRoom = (roomId: string, userInfo: User): boolean => {
             room.medalHolder = userInfo.id;
         }
         pokerGame._playerName = room.members;
+        getMoneyForUser(userInfo);
         return true;
     }
     return false;
@@ -199,7 +214,8 @@ const handleBetResults = (roomId: string, playerScores: { id: string, score: num
         const calculateRewardOrPenalty = (condition: boolean, rewardMultiplier: number, penaltyMultiplier: number) => {
             const amount = room.betAmount * (maxCoefficient + (condition ? rewardMultiplier : -penaltyMultiplier));
             userRewards.push({ userId: player.userInfo.id, amount });
-            player.userInfo.wallet += amount;
+            // player.userInfo.wallet += amount;
+            amount > 0 ? addMoneyForUser(player.userInfo, amount) : deductMoneyForUser(player.userInfo, amount)
             ownerWinCount += condition ? -rewardMultiplier : penaltyMultiplier;
         };
 
@@ -228,11 +244,12 @@ const handleBetResults = (roomId: string, playerScores: { id: string, score: num
 
     const medalHolderReward = room.betAmount * maxCoefficient * (room.members.length - 1) + (ownerWinCount * room.betAmount);
     userRewards.push({ userId: medalHolder.id, amount: medalHolderReward });
-    medalHolder.wallet += medalHolderReward;
-    getRewardWinnerWithArray(room.sessionId, userRewards);
+    // medalHolder.wallet += medalHolderReward;
+    medalHolderReward > 0 ? addMoneyForUser(medalHolder, medalHolderReward) : deductMoneyForUser(medalHolder, medalHolderReward)
+    // getRewardWinnerWithArray(room.sessionId, userRewards);
 
     // Send updated wallets
-    io.to(room.id).emit('playerWalletUpdated', playerWalletUpdates);
+    ioToFe.to(room.id).emit('playerWalletUpdated', playerWalletUpdates);
 
     // Update the medal holder
     const winner = playerScores.sort((a, b) => b.score - a.score)[0];
@@ -240,7 +257,7 @@ const handleBetResults = (roomId: string, playerScores: { id: string, score: num
         room.readyPlayer = room.readyPlayer.filter(player => player !== room.owner);
         room.medalHolder = winner.id;
         room.owner = winner.id;
-        io.to(room.id).emit('updateOwner', { roomOwner: room.owner, roomMembers: room.members });
+        ioToFe.to(room.id).emit('updateOwner', { roomOwner: room.owner, roomMembers: room.members });
     }
 };
 
@@ -250,7 +267,7 @@ const leaveRoom = (roomId: string, userId: string): boolean => {
         room.members = room.members.filter(member => member !== userId);
         room.readyPlayer = room.readyPlayer.filter(player => player !== userId);
         if (room.owner === userId && room.members.length > 0) {
-            io.to(room.id).emit('updateOwner', { roomOwner: room.members[0], roomMembers: room.members });
+            ioToFe.to(room.id).emit('updateOwner', { roomOwner: room.members[0], roomMembers: room.members });
             room.owner = room.members[0];
         }
         if (room.members.length === 0) {
@@ -433,7 +450,7 @@ class PokerGame {
 
 const pokerGame = new PokerGame();
 
-const getRoomMembers = (roomId: string): string[] | undefined => {
+export const getRoomMembers = (roomId: string): string[] | undefined => {
     const room = rooms.find(room => room.id === roomId);
     return room ? room.members : undefined;
 };
@@ -446,7 +463,7 @@ const checkMemberBeforeStartGame = (roomId: string): boolean => {
 const generateRoomId = (): string => {
     let roomId: string;
     do {
-        roomId = uuidv4().replace(/-/g, '').substring(0, 10); 
+        roomId = uuidv4().replace(/-/g, '').substring(0, 10);
     } while (rooms.some(room => room.id === roomId));
     return roomId;
 };
@@ -509,7 +526,7 @@ const getRewardWinner = async (currentGameId: string, userId: string, amount: nu
     }
 };
 
-io.on('connection', (socket) => {
+ioToFe.on('connection', (socket) => {
     if (socket && socket.id) {
         console.log(`Client connected: ${socket.id}`);
     } else {
@@ -523,7 +540,7 @@ io.on('connection', (socket) => {
             }
         }
     });
-    io.emit('listRoom', rooms);
+    ioToFe.emit('listRoom', rooms);
 
     socket.on('disconnect', () => {
         const user = getUserBySocketId(socket.id);
@@ -532,7 +549,7 @@ io.on('connection', (socket) => {
                 if (room.members.includes(user.id)) {
                     leaveRoom(room.id, user.id);
                     socket.leave(room.id);
-                    io.to(room.id).emit('roomLeft', { message: `User "${user.username}" left the room`, roomMembers: getRoomMembers(room.id) });
+                    ioToFe.to(room.id).emit('roomLeft', { message: `User "${user.username}" left the room`, roomMembers: getRoomMembers(room.id) });
                 }
             });
         }
@@ -542,14 +559,14 @@ io.on('connection', (socket) => {
     socket.on('leaveRoom', (data) => {
         const room = rooms.find(room => room.id === data.id);
         if (room && room.isPlaying) {
-            socket.emit('status', { message: 'Game already in progress' });
+            socket.emit('status', { message: `Phòng ${room.id} đã bắt đầu mất rồi.` });
             return;
         }
         if (leaveRoom(data.id, data.userId)) {
-            io.to(data.id).emit('roomLeft', { message: `Room "${data.id}" left successfully`, roomMembers: getRoomMembers(data.id) });
+            ioToFe.to(data.id).emit('roomLeft', { message: `Rời phòng "${data.id}" thành công`, roomMembers: getRoomMembers(data.id) });
             socket.leave(data.id);
         } else {
-            io.to(data.id).emit('roomLeft', { message: `Room "${data.id}" not found`, roomMembers: getRoomMembers(data.id) });
+            ioToFe.to(data.id).emit('roomLeft', { message: `Không tìm thấy phòng "${data.id}"`, roomMembers: getRoomMembers(data.id) });
         }
         rooms.forEach(room => {
             if (room.members.length === 0) {
@@ -560,11 +577,11 @@ io.on('connection', (socket) => {
             } else if (room.owner === data.userId) {
                 console.log('Owner left the room:', room.id);
                 room.owner = room.members[0];
-                io.to(room.id).emit('playerReady', { owner: room.owner, readyPlayer: room.readyPlayer });
+                ioToFe.to(room.id).emit('playerReady', { owner: room.owner, readyPlayer: room.readyPlayer });
             }
         });
         console.log('Rooms index:', rooms);
-        io.emit('listRoom', rooms);
+        ioToFe.emit('listRoom', rooms);
     });
 
     socket.on('agreeGame', (data) => {
@@ -579,7 +596,7 @@ io.on('connection', (socket) => {
 
             if (!room.readyPlayer.includes(room.owner)) room.readyPlayer.push(room.owner);
             console.log('Player ready 4:', data.userId, room.readyPlayer);
-            io.to(data.roomId).emit('playerReady', { owner: room.owner, readyPlayer: room.readyPlayer });
+            ioToFe.to(data.roomId).emit('playerReady', { owner: room.owner, readyPlayer: room.readyPlayer });
         } else {
             console.log(`Room ${data.roomId} not found`);
         }
@@ -624,21 +641,29 @@ io.on('connection', (socket) => {
     socket.on('createRoom', (data) => {
         const room = createRoom(data.name, socket, data.betAmount);
         socket.emit('roomCreated', room.id);
-        io.emit('listRoom', rooms);
+        ioToFe.emit('listRoom', rooms);
     });
 
     socket.on('joinRoom', (data) => {
         const room = rooms.find(room => room.id === data.roomId);
         if (!room) {
-            socket.emit('status', { message: 'Room not found' });
+            socket.emit('status', { message: `Không tìm thấy phòng ${data.roomId}` });
             return;
         }
 
         if (room.isPlaying) {
-            socket.emit('status', { message: 'Game already in progress' });
+            socket.emit('status', { message: 'Phòng đã bắt đầu r' });
             return;
         }
 
+        const user = getUserInfo(data.userInfo.id);
+        const insufficientFunds = user ? user.wallet < room.betAmount : true;
+
+        if (insufficientFunds) {
+            ioToFe.to(socket.id).emit('status', { message: 'Bạn chưa đủ GOLD để tham gia rồi!' });
+            return false;
+        }
+    
         const roomJoined = joinRoom(data.roomId, data.userInfo);
         const roomMembers = getRoomMembers(data.roomId)?.map((userId: string) => {
             const user = getUserInfo(userId);
@@ -659,8 +684,8 @@ io.on('connection', (socket) => {
         }
         console.log(`User ${data.userInfo.username} joined room ${data.roomId}`);
 
-        io.to(data.roomId).emit('roomJoined', {
-            message: roomJoined ? `Room "${data.roomId}" joined successfully` : `Room "${data.roomId}" not found`,
+        ioToFe.to(data.roomId).emit('roomJoined', {
+            message: roomJoined ? `Tham gia phòng "${data.roomId}" thành công` : `Không tìm thấy phòng "${data.roomId}"`,
             roomId: data.roomId,
             roomMembers,
             owner: room?.owner,
@@ -679,38 +704,44 @@ io.on('connection', (socket) => {
         if (room) room.userConfirmed.push(data.userId);
     });
 
+    socket.on('getBalance', (data) => {
+        handleGetBalance(data.userInfo.id);
+    });
+
+
     socket.on('startGame', (data) => {
         const room = rooms.find(room => room.id === data.roomId);
         if (!room) {
-            io.to(socket.id).emit('status', { message: 'Room not found' });
+            ioToFe.to(socket.id).emit('status', { message: 'Không tìm thấy phòng' });
             return;
         }
 
         if (room.members.length == 1) {
-            io.to(room.id).emit('status', { message: 'Not enough players' });
+            ioToFe.to(room.id).emit('status', { message: 'Phòng chưa có đủ người chơi' });
             return;
         }
 
         if (room.readyPlayer.length !== room.members.length) {
-            io.to(room.id).emit('status', { message: 'Not all players are ready', });
+            ioToFe.to(room.id).emit('status', { message: 'Tất cả mọi người cần phải cùng sẵn sàng', });
             return;
         }
 
         const owner = getUserInfo(room.owner);
+        console.log('getUserInfo ' + owner?.displayName + ' ' + owner?.wallet + ' ' + (room.betAmount * maxCoefficient * (room.members.length - 1)))
         if (!owner || owner.wallet < room.betAmount * maxCoefficient * (room.members.length - 1)) {
-            io.to(room.id).emit('status', { message: 'Owner does not have enough tokens' });
+            ioToFe.to(room.id).emit('status', { message: 'Chủ phòng không có đủ GOLD để bắt đầu!' });
             return;
         }
 
-        const insufficientFunds = room.members?.some(memberId => {
-            const user = getUserInfo(memberId);
-            return user ? user.wallet < (room.betAmount * maxCoefficient) : true;
-        });
+        // const insufficientFunds = room.members?.some(memberId => {
+        //     const user = getUserInfo(memberId);
+        //     return user ? user.wallet < (room.betAmount * maxCoefficient) : true;
+        // });
 
-        if (insufficientFunds) {
-            io.to(room.id).emit('status', { message: 'Some members do not have enough tokens' });
-            return;
-        }
+        // if (insufficientFunds) {
+        //     ioToFe.to(room.id).emit('status', { message: 'Some members do not have enough tokens' });
+        //     return;
+        // }
 
         if (!roomGames[data.roomId]) {
             roomGames[data.roomId] = new PokerGame();
@@ -720,54 +751,59 @@ io.on('connection', (socket) => {
         room.userConfirmed = [];
         room.sessionId = generateSessionId();
 
-        const roomMembers = getRoomMembers(data.roomId);
-        roomMembers?.forEach(memberId => {
-            const user = getUserInfo(memberId);
-            if (user) {
-                if (user.id !== room.medalHolder) {
-                    io.to(user.socketId).emit("startBet", {
-                        gameId: room.id,
-                        totalBet: room.betAmount * maxCoefficient,
-                        receiverId: BOT_ID,
-                        appId: APP_ID,
-                        currentGameId: room.sessionId,
-                    });
-                    user.wallet -= room.betAmount * maxCoefficient;
-                } else {
-                    io.to(user.socketId).emit("startBet", {
-                        gameId: room.id,
-                        totalBet: room.betAmount * maxCoefficient * (room.members.length - 1),
-                        receiverId: BOT_ID,
-                        appId: APP_ID,
-                        currentGameId: room.sessionId,
-                    });
-                    user.wallet -= room.betAmount * maxCoefficient * (room.members.length - 1);
-                }
-            }
-        });
+        // const roomMembers = getRoomMembers(data.roomId);
+        // roomMembers?.forEach(memberId => {
+        //     const user = getUserInfo(memberId);
+        //     if (user) {
+        //         if (user.id !== room.medalHolder) {
+        //             io.to(user.socketId).emit("startBet", {
+        //                 gameId: room.id,
+        //                 totalBet: room.betAmount * maxCoefficient,
+        //                 receiverId: BOT_ID,
+        //                 appId: APP_ID,
+        //                 currentGameId: room.sessionId,
+        //             });
+        //             user.wallet -= room.betAmount * maxCoefficient;
+        //             deductMoneyForUser(user, room.betAmount * maxCoefficient);
+        //         } else {
+        //             io.to(user.socketId).emit("startBet", {
+        //                 gameId: room.id,
+        //                 totalBet: room.betAmount * maxCoefficient * (room.members.length - 1),
+        //                 receiverId: BOT_ID,
+        //                 appId: APP_ID,
+        //                 currentGameId: room.sessionId,
+        //             });
+        //             user.wallet -= room.betAmount * maxCoefficient * (room.members.length - 1);
+        //             deductMoneyForUser(user, room.betAmount * maxCoefficient * (room.members.length - 1));
+        //         }
+        //     }
+        // });
 
-        setTimeout(() => {
-            const room = rooms.find(room => room.id === data.roomId);
-            if (!room) return;
-            console.log('All users confirmed:', room.allUserConfirmed);
-            if (room.allUserConfirmed || room.userConfirmed.length === room.members.length) {
-                dealCards(data.roomId);
-            } else {
-                io.to(room?.id).emit('userConfirmed', { message: 'Not all users confirmed' });
-                const userRewards: { userId: string, amount: number }[] = [];
-                for (let i = 0; i < room.userConfirmed.length; i++) {
-                    const user = getUserInfo(room.userConfirmed[i]);
-                    if (user) {
-                        userRewards.push({ userId: user.id, amount: room.betAmount * maxCoefficient });
-                        user.wallet += room.betAmount * maxCoefficient;
-                    }
-                }
-                getRewardWinnerWithArray(room.sessionId, userRewards);
-            }
-        }, 10000);
+        // setTimeout(() => {
+        //     const room = rooms.find(room => room.id === data.roomId);
+        //     if (!room) return;
+        //     console.log('All users confirmed:', room.allUserConfirmed);
+        //     if (room.allUserConfirmed || room.userConfirmed.length === room.members.length) {
+        //         dealCards(data.roomId);
+        //     } else {
+        //         io.to(room?.id).emit('userConfirmed', { message: 'Not all users confirmed' });
+        //         const userRewards: { userId: string, amount: number }[] = [];
+        //         for (let i = 0; i < room.userConfirmed.length; i++) {
+        //             const user = getUserInfo(room.userConfirmed[i]);
+        //             if (user) {
+        //                 userRewards.push({ userId: user.id, amount: room.betAmount * maxCoefficient });
+        //                 user.wallet += room.betAmount * maxCoefficient;
+        //                 addMoneyForUser(user, room.betAmount * maxCoefficient);
+        //             }
+        //         }
+        //         getRewardWinnerWithArray(room.sessionId, userRewards);
+        //     }
+        // }, 10000);
+        dealCards(data.roomId);
     });
+
 
 });
 server.listen(port, () => {
-    console.log('> Ready on http://localhost:${port}');
+    console.log(`> Ready on http://localhost:${port}`);
 });
